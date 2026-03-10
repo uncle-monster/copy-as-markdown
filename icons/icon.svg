@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <!-- 圆角背景 -->
+  <rect width="128" height="128" rx="20" fill="#4F46E5"/>
+  
+  <!-- 字母 M -->
+  <text x="64" y="75" 
+        font-family="Arial, sans-serif" 
+        font-size="70" 
+        font-weight="bold" 
+        fill="white" 
+        text-anchor="middle">M</text>
+  
+  <!-- 向下箭头 -->
+  <text x="95" y="95" 
+        font-family="Arial, sans-serif" 
+        font-size="30" 
+        fill="white" 
+        text-anchor="middle">↓</text>
+</svg>

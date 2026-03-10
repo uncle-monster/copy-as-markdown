@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "Copy as Markdown",
+  "version": "1.0.0",
+  "description": "复制网页内容自动转换为Markdown格式，完整保留数学公式",
+  "author": "Your Name",
+  
+  "permissions": [
+    "storage",
+    "activeTab",
+    "contextMenus"
+  ],
+  
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  
+  "background": {
+    "service_worker": "background.js"
+  },
+  
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["lib/turndown.js", "content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

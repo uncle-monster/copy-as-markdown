@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Copy as Markdown</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>📋 Copy as Markdown</h1>
+      <p class="subtitle">复制网页内容自动转换为 Markdown</p>
+    </header>
+
+    <!-- 快捷键说明 -->
+    <section class="shortcut-info">
+      <h3>📌 粘贴快捷键</h3>
+      <div class="shortcut-item">
+        <kbd>Ctrl</kbd> + <kbd>V</kbd>
+        <span class="desc">粘贴为 <strong>原始格式 (HTML)</strong></span>
+        <span class="hint">适用于 Word、富文本编辑器</span>
+      </div>
+      <div class="shortcut-item">
+        <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>V</kbd>
+        <span class="desc">粘贴为 <strong>Markdown 纯文本</strong></span>
+        <span class="hint">适用于 Typora、VS Code、Obsidian</span>
+      </div>
+    </section>
+
+    <main>
+      <!-- 主开关 -->
+      <div class="setting-item main-toggle">
+        <label class="toggle-label">
+          <span>启用扩展</span>
+          <input type="checkbox" id="enabled" checked>
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <hr>
+
+      <!-- 数学公式设置 -->
+      <section class="setting-section">
+        <h2>数学公式</h2>
+        
+        <div class="setting-item">
+          <label for="inlineMathDelimiter">行内公式分隔符</label>
+          <select id="inlineMathDelimiter">
+            <option value="$">$...$</option>
+            <option value="\\(">\(...\)</option>
+          </select>
+        </div>
+
+        <div class="setting-item">
+          <label for="blockMathDelimiter">块级公式分隔符</label>
+          <select id="blockMathDelimiter">
+            <option value="$$">$$...$$</option>
+            <option value="\\[">\[...\]</option>
+          </select>
+        </div>
+      </section>
+
+      <hr>
+
+      <!-- 格式设置 -->
+      <section class="setting-section">
+        <h2>格式选项</h2>
+
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>保留图片</span>
+            <input type="checkbox" id="preserveImages" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>保留表格</span>
+            <input type="checkbox" id="preserveTables" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-item">
+          <label class="toggle-label">
+            <span>转换斜体数学变量</span>
+            <input type="checkbox" id="convertItalicMath" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-item">
+          <label for="headingStyle">标题样式</label>
+          <select id="headingStyle">
+            <option value="atx"># ATX 样式</option>
+            <option value="setext">Setext 样式 (===)</option>
+          </select>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <button id="resetBtn" class="btn btn-secondary">重置设置</button>
+      <div class="version">v1.0.0</div>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
