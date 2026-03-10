@@ -1,5 +1,5 @@
 /**
- * Copy as Markdown - Content Script (v6 - 修复分数连接问题)
+ * Copy as Markdown - Content Script (v8 - 稳定版)
  */
 
 (function() {
@@ -35,11 +35,10 @@
       headingStyle: config.headingStyle,
       codeBlockStyle: config.codeBlockStyle,
       bulletListMarker: '-',
-      emDelimiter: '_'
+      emDelimiter: '*'  // 保持斜体为 *，后处理中识别
     });
 
     // ========== 过滤不需要的元素 ==========
-    
     service.addRule('removeStyle', {
       filter: 'style',
       replacement: function() { return ''; }
@@ -52,8 +51,17 @@
       replacement: function() { return ''; }
     });
 
+    // ========== 删除线 ==========
+    service.addRule('strikethrough', {
+      filter: ['del', 's', 'strike'],
+      replacement: function(content) {
+        return '~~' + content + '~~';
+      }
+    });
+
     // ========== 数学公式规则 ==========
 
+    // KaTeX
     service.addRule('katex', {
       filter: function(node) {
         return node.classList && node.classList.contains('katex');
@@ -63,7 +71,10 @@
         if (annotation) {
           const latex = annotation.textContent.trim();
           const isBlock = node.closest('.katex-display') !== null;
-          return formatMath(latex, isBlock);
+          if (isBlock) {
+            return '\n\n$$\n' + cleanLatex(latex) + '\n$$\n\n';
+          }
+          return '「MATH」' + cleanLatex(latex) + '「/MATH」';
         }
         return content;
       }
@@ -76,13 +87,14 @@
       replacement: function(content, node) {
         const annotation = node.querySelector('.katex-mathml annotation');
         if (annotation) {
-          return formatMath(annotation.textContent.trim(), true);
+          return '\n\n$$\n' + cleanLatex(annotation.textContent.trim()) + '\n$$\n\n';
         }
         return content;
       }
     });
 
-    service.addRule('mathjax2', {
+    // MathJax
+    service.addRule('mathjax', {
       filter: function(node) {
         return node.classList && (
           node.classList.contains('MathJax') ||
@@ -94,45 +106,35 @@
         if (node.classList.contains('MathJax_Preview')) return '';
         const script = node.nextElementSibling;
         if (script && script.type && script.type.includes('math/tex')) {
-          const isBlock = script.type.includes('mode=display') || 
-                          node.classList.contains('MathJax_Display');
-          return formatMath(script.textContent.trim(), isBlock);
+          const latex = script.textContent.trim();
+          const isBlock = script.type.includes('mode=display');
+          if (isBlock) {
+            return '\n\n$$\n' + cleanLatex(latex) + '\n$$\n\n';
+          }
+          return '「MATH」' + cleanLatex(latex) + '「/MATH」';
         }
         return content;
       }
     });
 
-    service.addRule('mathjax3', {
-      filter: function(node) {
-        return node.tagName && node.tagName.toLowerCase() === 'mjx-container';
-      },
-      replacement: function(content, node) {
-        let latex = node.getAttribute('data-latex');
-        if (!latex) {
-          const assistant = node.querySelector('mjx-assistive-mml annotation');
-          if (assistant) latex = assistant.textContent;
-        }
-        if (latex) {
-          const isBlock = node.hasAttribute('display') && 
-                          node.getAttribute('display') === 'true';
-          return formatMath(latex, isBlock);
-        }
-        return content;
-      }
-    });
-
+    // MathML
     service.addRule('mathml', {
       filter: 'math',
       replacement: function(content, node) {
         const annotation = node.querySelector('annotation[encoding*="tex"], annotation[encoding*="latex"]');
         if (annotation) {
+          const latex = annotation.textContent.trim();
           const isBlock = node.getAttribute('display') === 'block';
-          return formatMath(annotation.textContent.trim(), isBlock);
+          if (isBlock) {
+            return '\n\n$$\n' + cleanLatex(latex) + '\n$$\n\n';
+          }
+          return '「MATH」' + cleanLatex(latex) + '「/MATH」';
         }
         return content;
       }
     });
 
+    // Wikipedia 公式
     service.addRule('wikipedia-math', {
       filter: function(node) {
         return node.classList && node.classList.contains('mwe-math-element');
@@ -140,19 +142,26 @@
       replacement: function(content, node) {
         const annotation = node.querySelector('annotation');
         if (annotation) {
+          const latex = annotation.textContent.trim();
           const isBlock = node.querySelector('.mwe-math-fallback-image-display') !== null;
-          return formatMath(annotation.textContent.trim(), isBlock);
+          if (isBlock) {
+            return '\n\n$$\n' + cleanLatex(latex) + '\n$$\n\n';
+          }
+          return '「MATH」' + cleanLatex(latex) + '「/MATH」';
         }
         const img = node.querySelector('img');
         if (img && img.alt) {
           const isBlock = img.classList.contains('mwe-math-fallback-image-display');
-          return formatMath(img.alt, isBlock);
+          if (isBlock) {
+            return '\n\n$$\n' + cleanLatex(img.alt) + '\n$$\n\n';
+          }
+          return '「MATH」' + cleanLatex(img.alt) + '「/MATH」';
         }
         return content;
       }
     });
 
-    // Wikipedia 分数 - 使用特殊标记，后处理时合并
+    // Wikipedia 分数
     service.addRule('wikipediaFraction', {
       filter: function(node) {
         return node.classList && node.classList.contains('sfrac');
@@ -161,12 +170,7 @@
         const num = node.querySelector('.num');
         const den = node.querySelector('.den');
         if (num && den) {
-          return '⟪FRAC:' + num.textContent.trim() + '/' + den.textContent.trim() + ':FRAC⟫';
-        }
-        const text = node.textContent.trim();
-        const match = text.match(/(\d+)\/(\d+)/);
-        if (match) {
-          return '⟪FRAC:' + match[1] + '/' + match[2] + ':FRAC⟫';
+          return '「MATH」\\frac{' + num.textContent.trim() + '}{' + den.textContent.trim() + '}「/MATH」';
         }
         return content;
       }
@@ -180,34 +184,9 @@
       replacement: function(content, node) {
         const link = node.querySelector('a');
         if (link) {
-          const text = link.textContent.trim();
-          return '^' + text + '^';
+          return '^' + link.textContent.trim() + '^';
         }
         return content;
-      }
-    });
-
-    // 斜体数学变量
-    service.addRule('italicMathVar', {
-      filter: function(node) {
-        if (!config.convertItalicMath) return false;
-        if (node.nodeName !== 'I' && node.nodeName !== 'EM') return false;
-        const text = node.textContent.trim();
-        if (/^[a-zA-Z]$/.test(text)) return true;
-        if (/^[a-zA-Z]{2,3}$/.test(text) && !/^(the|and|for|are|but|not|you|all|can|had|her|was|one|our|out)$/i.test(text)) return true;
-        return false;
-      },
-      replacement: function(content, node) {
-        const text = node.textContent.trim();
-        return '⟦' + text + '⟧';
-      }
-    });
-
-        // ========== 删除线 ==========
-    service.addRule('strikethrough', {
-      filter: ['del', 's', 'strike'],
-      replacement: function(content) {
-        return '~~' + content + '~~';
       }
     });
 
@@ -255,18 +234,14 @@
     return service;
   }
 
-  function formatMath(latex, isBlock) {
-    latex = latex.trim()
+  // 清理 LaTeX 内容
+  function cleanLatex(latex) {
+    return latex.trim()
       .replace(/^\\\[|\\\]$/g, '')
       .replace(/^\\\(|\\\)$/g, '')
       .replace(/^\$\$|\$\$$/g, '')
       .replace(/^\$|\$$/g, '')
       .trim();
-
-    if (isBlock) {
-      return `\n\n${config.blockMathDelimiter}\n${latex}\n${config.blockMathDelimiter}\n\n`;
-    }
-    return `${config.inlineMathDelimiter}${latex}${config.inlineMathDelimiter}`;
   }
 
   function convertTableToMarkdown(table) {
@@ -298,92 +273,90 @@
   function postProcessMarkdown(markdown) {
     let result = markdown;
 
-    // ========== Step 1: 清理垃圾内容 ==========
+    // ========== Step 1: 清理垃圾 ==========
     result = result.replace(/\.mw-parser-output[\s\S]*?(?=\n\n|\n[A-Z]|$)/g, '');
-    result = result.replace(/\{[^}]*white-space:[^}]*\}/g, '');
     result = result.replace(/⁠/g, '');
 
-    // ========== Step 2: 处理分数+后续变量 ==========
-    // ⟪FRAC:1/2:FRAC⟫ab → $\frac{1}{2}ab$
-    // ⟪FRAC:1/2:FRAC⟫$ab$ → $\frac{1}{2}ab$
-    // ⟪FRAC:1/2:FRAC⟫⟦ab⟧ → $\frac{1}{2}ab$
-    result = result.replace(/⟪FRAC:(\d+)\/(\d+):FRAC⟫\s*\$?⟦?([a-zA-Z]+)⟧?\$?/g, 
-      '$\\frac{$1}{$2}$3$');
+    // ========== Step 2: 转换数学标记为 $...$ ==========
+    result = result.replace(/「MATH」([^「]+)「\/MATH」/g, function(match, latex) {
+      return '$' + latex.trim() + '$';
+    });
+
+    // ========== Step 3: 处理斜体变量 *a*, *b*, *c* ==========
+    // 单个字母的斜体 -> 数学变量
+    result = result.replace(/\*([a-zA-Z])\*/g, function(match, letter) {
+      return '$' + letter + '$';
+    });
     
-    // 单独的分数
-    result = result.replace(/⟪FRAC:(\d+)\/(\d+):FRAC⟫/g, '$\\frac{$1}{$2}$');
-
-    // ========== Step 3: 转换特殊标记的变量 ==========
-    result = result.replace(/⟦([a-zA-Z]+)⟧/g, function(match, varName) {
-      const nonMathWords = ['a', 'an', 'as', 'at', 'be', 'by', 'do', 'go', 'he', 'if', 'in', 'is', 'it', 'me', 'my', 'no', 'of', 'on', 'or', 'so', 'to', 'up', 'us', 'we', 'and', 'the', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out'];
-      if (nonMathWords.includes(varName.toLowerCase())) {
-        return varName;
+    // 2-3个字母的斜体变量 (排除常见单词)
+    result = result.replace(/\*([a-zA-Z]{2,3})\*/g, function(match, letters) {
+      const nonMath = ['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'has', 'its', 'two', 'also'];
+      if (nonMath.includes(letters.toLowerCase())) {
+        return '*' + letters + '*';
       }
-      return '$' + varName + '$';
+      return '$' + letters + '$';
     });
 
-    // ========== Step 4: 处理括号+上标 ==========
-    result = result.replace(/\(([^)]+)\)([²³⁴⁵⁶⁷⁸⁹0-9]+)/g, function(match, inner, exp) {
-      let cleanInner = inner.replace(/\$/g, '').trim();
-      let power = convertSuperscript(exp);
-      return '$(' + cleanInner + ')^' + power + '$';
-    });
-
-    // ========== Step 5: 处理变量+上标 ==========
-    result = result.replace(/\$([a-zA-Z]+)\$([²³⁴⁵⁶⁷⁸⁹0-9]+)/g, function(match, varName, exp) {
-      let power = convertSuperscript(exp);
+    // ========== Step 4: 处理变量后的数字上标 ==========
+    // $a$2 -> $a^2$
+    result = result.replace(/\$([a-zA-Z]+)\$([0-9²³⁴⁵⁶⁷⁸⁹]+)/g, function(match, varName, exp) {
+      const power = convertSuperscript(exp);
       return '$' + varName + '^' + power + '$';
     });
 
-    // 纯文本变量+Unicode上标
-    result = result.replace(/\b([a-z])\s*([²³⁴⁵⁶⁷⁸⁹])/g, function(match, varName, exp) {
-      let power = convertSuperscript(exp);
-      return '$' + varName + '^' + power + '$';
+    // 独立的 a2, b2 (字母紧跟数字)
+    result = result.replace(/\b([a-zA-Z])([²³⁴⁵⁶⁷⁸⁹])/g, function(match, letter, exp) {
+      const power = convertSuperscript(exp);
+      return '$' + letter + '^' + power + '$';
     });
 
-    // ========== Step 6: 合并相邻数学表达式 ==========
-    for (let i = 0; i < 3; i++) {
+    // ========== Step 5: 处理括号表达式+上标 ==========
+    // (a + $b$)2 -> $(a + b)^2$
+    result = result.replace(/\(([^)]+)\)([0-9²³⁴⁵⁶⁷⁸⁹]+)/g, function(match, inner, exp) {
+      // 清理括号内的 $ 符号
+      const cleanInner = inner.replace(/\$/g, '').trim();
+      const power = convertSuperscript(exp);
+      return '$('+cleanInner + ')^' + power + '$';
+    });
+
+    // ========== Step 6: 处理数字+变量 ==========
+    // 2$ab$ -> $2ab$
+    result = result.replace(/(\d+)\$([a-zA-Z]+)\$/g, '$$$1$2$$');
+
+    // ========== Step 7: 合并相邻数学表达式 ==========
+    for (let i = 0; i < 5; i++) {
+      // $a$ + $b$ -> $a + b$
       result = result.replace(/\$([^$]+)\$\s*\+\s*\$([^$]+)\$/g, '$$$1 + $2$$');
       result = result.replace(/\$([^$]+)\$\s*[−–\-]\s*\$([^$]+)\$/g, '$$$1 - $2$$');
       result = result.replace(/\$([^$]+)\$\s*=\s*\$([^$]+)\$/g, '$$$1 = $2$$');
     }
 
-    // ========== Step 7: 处理混合情况 ==========
-    result = result.replace(/\b([a-z])\s*\+\s*\$([a-z])\$/g, '$$$1 + $2$$');
-    result = result.replace(/\$([a-z])\$\s*\+\s*([a-z])\b/g, '$$$1 + $2$$');
-    result = result.replace(/\b([a-z])\s*[−–\-]\s*\$([a-z])\$/g, '$$$1 - $2$$');
-    result = result.replace(/\$([a-z])\$\s*[−–\-]\s*([a-z])\b/g, '$$$1 - $2$$');
-
-    // ========== Step 8: 清理引用格式 ==========
-    result = result.replace(/\^+\[(\d+)\]\^*/g, '^[$1]^');
-
-    // ========== Step 9: 修复连续/嵌套的 $ 符号 ==========
-    // $...$ab$ → $...ab$ (分数后面跟变量的情况)
-    result = result.replace(/\$([^$]+)\$([a-z]+)\$/g, '$$$1$2$$');
+    // ========== Step 8: 清理多余的 $ 符号 ==========
+    // $$...$ 或 $...$$ -> $...$
+    result = result.replace(/\$\$([^$\n]{1,50})\$(?!\$)/g, '$$$1$$');
+    result = result.replace(/(?<!\$)\$([^$\n]{1,50})\$\$/g, '$$$1$$');
     
-    // $$...$ 或 $...$$ → $...$
-    result = result.replace(/\$\$([^$\n]+)\$/g, '$$$1$$');
-    result = result.replace(/\$([^$\n]+)\$\$/g, '$$$1$$');
-    
-    // $$$...$$$ → $...$
+    // $$$ -> $
     result = result.replace(/\${3,}([^$]+)\${3,}/g, '$$$1$$');
+    result = result.replace(/\${3,}/g, '$$');
 
-    // ========== Step 10: 统一减号 ==========
-    // 在 $ $ 内部统一使用标准减号
+    // ========== Step 9: 统一减号 ==========
     result = result.replace(/\$([^$]+)\$/g, function(match, inner) {
       return '$' + inner.replace(/[−–]/g, '-') + '$';
     });
 
-    // ========== Step 11: 清理空行和空格 ==========
+    // ========== Step 10: 清理引用格式 ==========
+    result = result.replace(/\^+\[(\d+)\]\^*/g, '^[$1]^');
+
+    // ========== Step 11: 清理空行 ==========
     result = result.replace(/\n{3,}/g, '\n\n');
-    result = result.replace(/  +/g, ' ');
     result = result.trim();
 
     return result;
   }
 
   function convertSuperscript(str) {
-    return str
+    return String(str)
       .replace(/²/g, '2').replace(/³/g, '3').replace(/⁴/g, '4')
       .replace(/⁵/g, '5').replace(/⁶/g, '6').replace(/⁷/g, '7')
       .replace(/⁸/g, '8').replace(/⁹/g, '9').replace(/⁰/g, '0');
@@ -457,5 +430,5 @@
     }, 2000);
   }
 
-  console.log('Copy as Markdown extension loaded (v6)');
+  console.log('Copy as Markdown extension loaded (v8)');
 })();
