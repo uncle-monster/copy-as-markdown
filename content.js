@@ -190,21 +190,15 @@
 
   // ========== 清理 LaTeX 内容 ==========
   function cleanLatexContent(latex) {
+    if (!latex) return '';
+    // 仅当公式以 {\displaystyle 开头且以 } 结尾时，成对剥离最外层
+    if (latex.startsWith('{\\displaystyle') && latex.endsWith('}')) {
+      latex = latex.substring(15, latex.length - 1);
+    }
     return latex
-      .replace(/^\{\\displaystyle\s*/, '').replace(/\}$/, '')
-      .replace(/\\([a-zA-Z]+)\s+\{/g, '\\$1{')
-      .replace(/\}\s+\{/g, '}{')
-      .replace(/\}\s+_/g, '}_')
-      .replace(/\}\s+\^/g, '}^')
-      .replace(/_\s+\{/g, '_{')
-      .replace(/\^\s+\{/g, '^{')
-      .replace(/\s+\}/g, '}')
-      .replace(/\{\s+/g, '{')
-      .replace(/-\\/g, '-')
-      .replace(/=\\/g, '=')
-      .replace(/\\\s*$/g, '')
-      .replace(/^\s+|\s+$/g, '')
-      .replace(/[−–—]/g, '-');
+      .replace(/[−–—]/g, '-') // 统一减号字符
+      .replace(/\\([a-zA-Z]+)\s+\{/g, '\\$1{') // 修复 LaTeX 里的多余空格
+      .trim();
   }
 
   // ========== 创建 Turndown 服务 ==========
@@ -284,12 +278,16 @@
         filter: function(node) {
           return node.nodeName === 'SUP' && node.classList && node.classList.contains('reference');
         },
-        replacement: function(content, node) {
-          const link = node.querySelector('a');
-          if (link) {
-            return '^' + link.textContent.trim() + '^';
-          }
-          return content;
+        // 不保留引用
+        // replacement: function(content, node) {
+        //   const link = node.querySelector('a');
+        //   if (link) {
+        //     return '^' + link.textContent.trim() + '^';
+        //   }
+        //   return content;
+        // }
+        replacement: function() { 
+          return ''; // 返回空字符串，不保留任何引用标记
         }
       });
 
@@ -551,27 +549,20 @@
 
   // ========== 提取单元格内容 ==========
   function extractCellContent(cell, siteInfo) {
-    // 处理公式
+    // 1. 优先提取公式
     const annotations = cell.querySelectorAll('annotation');
     if (annotations.length > 0) {
       const formulas = [];
       annotations.forEach(ann => {
         let latex = ann.textContent.trim();
         if (latex) {
-          latex = cleanLatexContent(latex);
-          formulas.push(latex);
+          // 使用上面修改后的 cleanLatexContent
+          formulas.push(cleanLatexContent(latex));
         }
       });
+      // 如果单元格内有公式，直接返回带 $ 的格式，避免后续 textContent 干扰
       if (formulas.length > 0) {
-        let refText = '';
-        cell.querySelectorAll('sup.reference').forEach(sup => {
-          const link = sup.querySelector('a');
-          if (link) {
-            let refNum = link.textContent.trim().replace(/^\[|\]$/g, '');
-            refText += '^[' + refNum + ']^';
-          }
-        });
-        return '$' + formulas.join(' ') + '$' + refText;
+        return '$' + formulas.join(' ') + '$';
       }
     }
 
@@ -596,40 +587,46 @@
     clone.querySelectorAll('.mwe-math-element, math').forEach(el => el.remove());
     
     // 处理引用
-    let refInfo = null;
-    clone.querySelectorAll('sup.reference').forEach(sup => {
-      const link = sup.querySelector('a');
-      if (link) {
-        let refNum = link.textContent.trim().replace(/^\[|\]$/g, '');
-        refInfo = { num: refNum, element: sup };
-      }
-    });
+    // let refInfo = null;
+    // clone.querySelectorAll('sup.reference').forEach(sup => {
+    //   const link = sup.querySelector('a');
+    //   if (link) {
+    //     let refNum = link.textContent.trim().replace(/^\[|\]$/g, '');
+    //     refInfo = { num: refNum, element: sup };
+    //   }
+    // });
     
-    if (refInfo) {
-      let afterText = '';
-      let node = refInfo.element.nextSibling;
-      while (node) {
-        if (node.nodeType === Node.TEXT_NODE) {
-          afterText += node.textContent;
-        }
-        node = node.nextSibling;
-      }
+    // if (refInfo) {
+    //   let afterText = '';
+    //   let node = refInfo.element.nextSibling;
+    //   while (node) {
+    //     if (node.nodeType === Node.TEXT_NODE) {
+    //       afterText += node.textContent;
+    //     }
+    //     node = node.nextSibling;
+    //   }
       
-      afterText = afterText.replace(/[–—−]/g, '-');
-      const pageMatch = afterText.match(/^[:\s]*(\d+)\s*-\s*(\d+)/);
+    //   afterText = afterText.replace(/[–—−]/g, '-');
+    //   const pageMatch = afterText.match(/^[:\s]*(\d+)\s*-\s*(\d+)/);
       
-      if (pageMatch) {
-        refInfo.pages = pageMatch[1] + '-' + pageMatch[2];
-        if (refInfo.element.nextSibling) {
-          refInfo.element.nextSibling.textContent = afterText.replace(/^[:\s]*\d+\s*-\s*\d+/, '');
-        }
-      }
+    //   if (pageMatch) {
+    //     refInfo.pages = pageMatch[1] + '-' + pageMatch[2];
+    //     if (refInfo.element.nextSibling) {
+    //       refInfo.element.nextSibling.textContent = afterText.replace(/^[:\s]*\d+\s*-\s*\d+/, '');
+    //     }
+    //   }
       
-      const refText = refInfo.pages 
-        ? '【REF' + refInfo.num + ':' + refInfo.pages + 'REF】'
-        : '【REF' + refInfo.num + 'REF】';
-      refInfo.element.replaceWith(document.createTextNode(refText));
-    }
+    //   const refText = refInfo.pages 
+    //     ? '【REF' + refInfo.num + ':' + refInfo.pages + 'REF】'
+    //     : '【REF' + refInfo.num + 'REF】';
+    //   refInfo.element.replaceWith(document.createTextNode(refText));
+    // }
+
+    // 统一去掉注释上标：直接移除所有带有 reference 类名的 sup 元素
+    clone.querySelectorAll('sup.reference').forEach(sup => sup.remove());
+
+    // 同时移除单元格内可能残留的 annotation 之外的数学引用干扰（可选）
+    clone.querySelectorAll('.mw-reftooltip-cite').forEach(el => el.remove());
     
     // 处理普通上标
     clone.querySelectorAll('sup').forEach(sup => {
@@ -777,6 +774,12 @@
       if (postProcessors[procName]) {
         result = postProcessors[procName](result);
       }
+    }
+
+    // 如果是 Wikipedia，增加一行正则，强制清除可能漏掉的 [1] 或 ^[1]^ 格式，清除上标
+    if (siteInfo.site === 'wikipedia') {
+      result = result.replace(/\^\[[^\]]+\]\^/g, ''); // 清除 ^[1]^
+      result = result.replace(/\\\[\d+\\\]/g, '');    // 清除 \[1\]
     }
 
     // ===== 最终修复：损坏的公式 =====
