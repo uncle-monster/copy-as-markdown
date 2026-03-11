@@ -1,10 +1,11 @@
 /**
- * Copy as Markdown - Content Script (v10 - 修复表头)
+ * Copy as Markdown - Content Script (v11 - 多网站支持)
  */
 
 (function() {
   'use strict';
 
+  // ========== 配置 ==========
   let config = {
     enabled: true,
     inlineMathDelimiter: '$',
@@ -12,8 +13,7 @@
     preserveImages: true,
     preserveTables: true,
     headingStyle: 'atx',
-    codeBlockStyle: 'fenced',
-    convertItalicMath: true
+    codeBlockStyle: 'fenced'
   };
 
   if (typeof chrome !== 'undefined' && chrome.storage) {
@@ -30,199 +30,185 @@
     });
   }
 
-    /**
-   * 从单元格中提取内容（公式、文本、引用、上标）
-   */
-  function extractCellContent(cell) {
-    // 先处理公式
-    const annotations = cell.querySelectorAll('annotation');
+  // ========== 网���检测 ==========
+  function detectSite() {
+    const hostname = window.location.hostname.toLowerCase();
     
-    if (annotations.length > 0) {
-      const formulas = [];
-      annotations.forEach(ann => {
-        let latex = ann.textContent.trim();
-        if (latex) {
-          latex = latex.replace(/^\{\\displaystyle\s*/, '').replace(/\}$/, '');
-          formulas.push(latex);
-        }
-      });
-      
-      if (formulas.length > 0) {
-        let refText = '';
-        cell.querySelectorAll('sup.reference').forEach(sup => {
-          const link = sup.querySelector('a');
-          if (link) {
-            refText += '^' + link.textContent.trim() + '^';
-          }
-        });
-        return '$' + formulas.join(' ') + '$' + refText;
-      }
+    if (hostname.includes('wikipedia.org') || hostname.includes('wikimedia.org')) {
+      return 'wikipedia';
     }
-
-    // 查找 mwe-math-element
-    const mathElements = cell.querySelectorAll('.mwe-math-element');
-    if (mathElements.length > 0) {
-      const formulas = [];
-      mathElements.forEach(el => {
-        const ann = el.querySelector('annotation');
-        if (ann) {
-          let latex = ann.textContent.trim();
-          latex = latex.replace(/^\{?\\displaystyle\s*/, '').replace(/\}?$/, '');
-          formulas.push(latex);
-        }
-      });
-      if (formulas.length > 0) {
-        let refText = '';
-        cell.querySelectorAll('sup.reference').forEach(sup => {
-          const link = sup.querySelector('a');
-          if (link) {
-            refText += '^' + link.textContent.trim() + '^';
-          }
-        });
-        return '$' + formulas.join(' ') + '$' + refText;
-      }
+    if (hostname.includes('codeforces.com')) {
+      return 'codeforces';
     }
-
-    // 没有公式，创建副本处理
-    const clone = cell.cloneNode(true);
-    
-    // 移除公式元素
-    clone.querySelectorAll('.mwe-math-element').forEach(el => el.remove());
-    clone.querySelectorAll('math').forEach(el => el.remove());
-    
-    // 处理引用上标：提取引用编号和页码
-    let refInfo = null;
-    clone.querySelectorAll('sup.reference').forEach(sup => {
-      const link = sup.querySelector('a');
-      if (link) {
-        let refNum = link.textContent.trim().replace(/^\[|\]$/g, '');
-        refInfo = { num: refNum, element: sup };
-      }
-    });
-    
-    // 如果有引用，获取后面的页码
-    if (refInfo) {
-      // 获取引用后的文本（可能包含页码）
-      let afterText = '';
-      let node = refInfo.element.nextSibling;
-      while (node) {
-        if (node.nodeType === Node.TEXT_NODE) {
-          afterText += node.textContent;
-        }
-        node = node.nextSibling;
-      }
-      
-      // 提取页码 : 782-783 或 :782-783
-      afterText = afterText.replace(/[–—−]/g, '-');
-      const pageMatch = afterText.match(/^[:\s]*(\d+)\s*-\s*(\d+)/);
-      const singlePageMatch = afterText.match(/^[:\s]*(\d+)(?!\s*-)/);
-      
-      if (pageMatch) {
-        refInfo.pages = pageMatch[1] + '-' + pageMatch[2];
-        // 移除页码部分
-        refInfo.element.nextSibling && (refInfo.element.nextSibling.textContent = 
-          afterText.replace(/^[:\s]*\d+\s*-\s*\d+/, ''));
-      } else if (singlePageMatch) {
-        refInfo.pages = singlePageMatch[1];
-        refInfo.element.nextSibling && (refInfo.element.nextSibling.textContent = 
-          afterText.replace(/^[:\s]*\d+/, ''));
-      }
-      
-      // 替换引用元素
-      const refText = refInfo.pages 
-        ? '【REF' + refInfo.num + ':' + refInfo.pages + 'REF】'
-        : '【REF' + refInfo.num + 'REF】';
-      refInfo.element.replaceWith(document.createTextNode(refText));
+    if (hostname.includes('leetcode.com') || hostname.includes('leetcode.cn')) {
+      return 'leetcode';
+    }
+    if (hostname.includes('stackoverflow.com') || hostname.includes('stackexchange.com')) {
+      return 'stackoverflow';
+    }
+    if (hostname.includes('github.com')) {
+      return 'github';
+    }
+    if (hostname.includes('zhihu.com')) {
+      return 'zhihu';
+    }
+    if (hostname.includes('csdn.net')) {
+      return 'csdn';
+    }
+    if (hostname.includes('juejin.cn')) {
+      return 'juejin';
+    }
+    if (hostname.includes('notion.so') || hostname.includes('notion.site')) {
+      return 'notion';
+    }
+    if (hostname.includes('arxiv.org')) {
+      return 'arxiv';
+    }
+    if (hostname.includes('overleaf.com')) {
+      return 'overleaf';
+    }
+    if (hostname.includes('mathjax') || document.querySelector('.MathJax')) {
+      return 'mathjax';
+    }
+    if (document.querySelector('.katex')) {
+      return 'katex';
     }
     
-    // 处理普通上标（纯数字）
-    clone.querySelectorAll('sup').forEach(sup => {
-      const content = sup.textContent.trim();
-      if (/^\d+$/.test(content)) {
-        const superscriptMap = {
-          '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴',
-          '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹'
-        };
-        let superText = '';
-        for (const char of content) {
-          superText += superscriptMap[char] || char;
-        }
-        sup.replaceWith(document.createTextNode(superText));
-      }
-    });
-    
-    // 处理下标（纯数字）
-    clone.querySelectorAll('sub').forEach(sub => {
-      const content = sub.textContent.trim();
-      if (/^\d+$/.test(content)) {
-        const subscriptMap = {
-          '0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
-          '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉'
-        };
-        let subText = '';
-        for (const char of content) {
-          subText += subscriptMap[char] || char;
-        }
-        sub.replaceWith(document.createTextNode(subText));
-      }
-    });
-    
-    // 提取文本
-    let text = clone.textContent.trim()
-      .replace(/\|/g, '\\|')
-      .replace(/\s+/g, ' ')
-      .replace(/\n/g, ' ');
-    
-    // 还原引用格式
-    text = text.replace(/【REF(\d+):(\d+-\d+)REF】/g, '^[$1]:$2^');
-    text = text.replace(/【REF(\d+):(\d+)REF】/g, '^[$1]:$2^');
-    text = text.replace(/【REF(\d+)REF】/g, '^[$1]^');
-
-    return text;
+    return 'default';
   }
 
-
-    /**
-   * 将表格转换为 Markdown
-   */
-  function convertTableToMarkdown(table) {
-    const rows = table.querySelectorAll('tr');
-    if (rows.length === 0) return '';
-
-    let markdown = '\n\n';
+  // ========== 网站特定配置 ==========
+  const siteConfigs = {
+    // Wikipedia 配置
+    wikipedia: {
+      mathSelector: '.mwe-math-element annotation',
+      mathDisplaySelector: '.mwe-math-fallback-image-display',
+      removeSelectors: ['.mw-editsection', '.reference', 'style', '.sr-only'],
+      hasFractions: true,
+      hasReferences: true,
+      postProcess: ['cleanEditLinks', 'cleanReferences', 'cleanLatexSpaces']
+    },
     
-    // 处理表格标题 <caption>
-    const caption = table.querySelector('caption');
-    if (caption) {
-      // 提取标题文字，可能包含公式
-      let captionContent = extractCellContent(caption);
-      // 移除编辑链接
-      captionContent = captionContent.replace(/\s*\[编辑\]\s*/g, '').trim();
-      if (captionContent) {
-        markdown += '**' + captionContent + '**\n\n';
-      }
+    // Codeforces 配置
+    codeforces: {
+      mathSelector: 'script[type*="math/tex"]',
+      mathDisplaySelector: 'script[type*="mode=display"]',
+      removeSelectors: ['.MathJax_Preview', '.MathJax', '.mjx-chtml'],
+      hasDoubleMath: true,  // 公式会重复显示
+      postProcess: ['cleanDoubleMath', 'cleanLatexSpaces']
+    },
+    
+    // LeetCode 配置
+    leetcode: {
+      mathSelector: '.katex-mathml annotation',
+      mathDisplaySelector: '.katex-display',
+      removeSelectors: ['.katex-html'],
+      postProcess: ['cleanLatexSpaces']
+    },
+    
+    // Stack Overflow 配置
+    stackoverflow: {
+      mathSelector: 'script[type*="math/tex"]',
+      mathDisplaySelector: '.MathJax_Display',
+      removeSelectors: ['.MathJax_Preview'],
+      hasCodeBlocks: true,
+      postProcess: ['cleanLatexSpaces']
+    },
+    
+    // 知乎配置
+    zhihu: {
+      mathSelector: '.ztext-math',
+      mathDisplaySelector: '.ztext-math[data-display="block"]',
+      removeSelectors: [],
+      postProcess: ['cleanLatexSpaces']
+    },
+    
+    // GitHub 配置
+    github: {
+      mathSelector: 'math annotation',
+      mathDisplaySelector: 'math[display="block"]',
+      removeSelectors: [],
+      hasCodeBlocks: true,
+      postProcess: []
+    },
+    
+    // CSDN 配置
+    csdn: {
+      mathSelector: '.katex-mathml annotation',
+      mathDisplaySelector: '.katex-display',
+      removeSelectors: ['.katex-html'],
+      postProcess: ['cleanLatexSpaces']
+    },
+    
+    // Notion 配置
+    notion: {
+      mathSelector: '.notion-equation-block annotation',
+      mathDisplaySelector: '.notion-equation-block',
+      removeSelectors: [],
+      postProcess: ['cleanLatexSpaces']
+    },
+    
+    // arXiv 配置
+    arxiv: {
+      mathSelector: 'script[type*="math/tex"]',
+      mathDisplaySelector: 'script[type*="mode=display"]',
+      removeSelectors: ['.MathJax_Preview', '.MathJax'],
+      postProcess: ['cleanLatexSpaces']
+    },
+    
+    // 默认配置（通用 MathJax/KaTeX）
+    default: {
+      mathSelector: 'annotation[encoding*="tex"], script[type*="math/tex"]',
+      mathDisplaySelector: '.MathJax_Display, .katex-display',
+      removeSelectors: ['.MathJax_Preview', '.katex-html'],
+      postProcess: ['cleanLatexSpaces']
+    },
+    
+    // 纯 MathJax 网站
+    mathjax: {
+      mathSelector: 'script[type*="math/tex"]',
+      mathDisplaySelector: 'script[type*="mode=display"]',
+      removeSelectors: ['.MathJax_Preview', '.MathJax'],
+      postProcess: ['cleanLatexSpaces']
+    },
+    
+    // 纯 KaTeX 网站
+    katex: {
+      mathSelector: '.katex-mathml annotation',
+      mathDisplaySelector: '.katex-display',
+      removeSelectors: ['.katex-html'],
+      postProcess: ['cleanLatexSpaces']
     }
+  };
 
-    let headerProcessed = false;
-
-    rows.forEach((row, index) => {
-      const cells = row.querySelectorAll('th, td');
-      const cellContents = Array.from(cells).map(cell => extractCellContent(cell));
-
-      markdown += '| ' + cellContents.join(' | ') + ' |\n';
-
-      // 添加分隔行
-      if (!headerProcessed) {
-        const separator = cellContents.map(() => '---').join(' | ');
-        markdown += '| ' + separator + ' |\n';
-        headerProcessed = true;
-      }
-    });
-
-    return markdown + '\n';
+  // ========== 获取当前网站配置 ==========
+  function getSiteConfig() {
+    const site = detectSite();
+    console.log('Detected site:', site);
+    return { site, config: siteConfigs[site] || siteConfigs.default };
   }
 
-  function createTurndownService() {
+  // ========== 清理 LaTeX 内容 ==========
+  function cleanLatexContent(latex) {
+    return latex
+      .replace(/^\{\\displaystyle\s*/, '').replace(/\}$/, '')
+      .replace(/\\([a-zA-Z]+)\s+\{/g, '\\$1{')
+      .replace(/\}\s+\{/g, '}{')
+      .replace(/\}\s+_/g, '}_')
+      .replace(/\}\s+\^/g, '}^')
+      .replace(/_\s+\{/g, '_{')
+      .replace(/\^\s+\{/g, '^{')
+      .replace(/\s+\}/g, '}')
+      .replace(/\{\s+/g, '{')
+      .replace(/-\\/g, '-')
+      .replace(/=\\/g, '=')
+      .replace(/\\\s*$/g, '')
+      .replace(/^\s+|\s+$/g, '')
+      .replace(/[−–—]/g, '-');
+  }
+
+  // ========== 创建 Turndown 服务 ==========
+  function createTurndownService(siteInfo) {
     const service = new TurndownService({
       headingStyle: config.headingStyle,
       codeBlockStyle: config.codeBlockStyle,
@@ -230,31 +216,25 @@
       emDelimiter: '*'
     });
 
-    // ========== 过滤不需要的元素 ==========
-    service.addRule('removeStyle', {
-      filter: 'style',
-      replacement: function() { return ''; }
-    });
+    const siteConfig = siteInfo.config;
 
-    service.addRule('removeSrOnly', {
-      filter: function(node) {
-        return node.classList && node.classList.contains('sr-only');
-      },
-      replacement: function() { return ''; }
-    });
+    // 移除不需要的元素
+    if (siteConfig.removeSelectors) {
+      service.addRule('removeUnwanted', {
+        filter: function(node) {
+          return siteConfig.removeSelectors.some(selector => {
+            try {
+              return node.matches && node.matches(selector);
+            } catch (e) {
+              return false;
+            }
+          });
+        },
+        replacement: function() { return ''; }
+      });
+    }
 
-    // 移除 Wikipedia 编辑链接
-    service.addRule('removeEditLinks', {
-      filter: function(node) {
-        if (node.nodeName === 'SPAN' && node.classList) {
-          return node.classList.contains('mw-editsection');
-        }
-        return false;
-      },
-      replacement: function() { return ''; }
-    });
-
-    // ========== 删除线 ==========
+    // 删除线
     service.addRule('strikethrough', {
       filter: ['del', 's', 'strike'],
       replacement: function(content) {
@@ -262,149 +242,248 @@
       }
     });
 
-    // ========== 数学公式规则 ==========
-
-    service.addRule('katex', {
-      filter: function(node) {
-        return node.classList && node.classList.contains('katex');
-      },
-      replacement: function(content, node) {
-        const annotation = node.querySelector('.katex-mathml annotation');
-        if (annotation) {
-          const latex = cleanLatex(annotation.textContent.trim());
-          const isBlock = node.closest('.katex-display') !== null;
-          if (isBlock) {
-            return '\n\n$$\n' + latex + '\n$$\n\n';
+    // ========== 数学公式处理（根据网站类型）==========
+    
+    // Wikipedia 公式
+    if (siteInfo.site === 'wikipedia') {
+      service.addRule('wikipediaMath', {
+        filter: function(node) {
+          return node.classList && node.classList.contains('mwe-math-element');
+        },
+        replacement: function(content, node) {
+          const annotation = node.querySelector('annotation');
+          if (annotation) {
+            const latex = cleanLatexContent(annotation.textContent.trim());
+            const isBlock = node.querySelector('.mwe-math-fallback-image-display') !== null;
+            if (isBlock) {
+              return '\n\n$$\n' + latex + '\n$$\n\n';
+            }
+            return '$' + latex + '$';
           }
-          return '「M」' + latex + '「/M」';
+          return content;
         }
-        return content;
-      }
-    });
+      });
 
-    service.addRule('katex-display', {
-      filter: function(node) {
-        return node.classList && node.classList.contains('katex-display');
-      },
-      replacement: function(content, node) {
-        const annotation = node.querySelector('.katex-mathml annotation');
-        if (annotation) {
-          return '\n\n$$\n' + cleanLatex(annotation.textContent.trim()) + '\n$$\n\n';
-        }
-        return content;
-      }
-    });
-
-    service.addRule('mathjax', {
-      filter: function(node) {
-        return node.classList && (
-          node.classList.contains('MathJax') ||
-          node.classList.contains('MathJax_Display') ||
-          node.classList.contains('MathJax_Preview')
-        );
-      },
-      replacement: function(content, node) {
-        if (node.classList.contains('MathJax_Preview')) return '';
-        const script = node.nextElementSibling;
-        if (script && script.type && script.type.includes('math/tex')) {
-          const latex = cleanLatex(script.textContent.trim());
-          const isBlock = script.type.includes('mode=display');
-          if (isBlock) {
-            return '\n\n$$\n' + latex + '\n$$\n\n';
+      // Wikipedia 分数
+      service.addRule('wikipediaFraction', {
+        filter: function(node) {
+          return node.classList && node.classList.contains('sfrac');
+        },
+        replacement: function(content, node) {
+          const num = node.querySelector('.num');
+          const den = node.querySelector('.den');
+          if (num && den) {
+            return '$\\frac{' + num.textContent.trim() + '}{' + den.textContent.trim() + '}$';
           }
-          return '「M」' + latex + '「/M」';
+          return content;
         }
-        return content;
-      }
-    });
+      });
 
-    service.addRule('mathml', {
-      filter: 'math',
-      replacement: function(content, node) {
-        const annotation = node.querySelector('annotation[encoding*="tex"], annotation[encoding*="latex"]');
-        if (annotation) {
-          const latex = cleanLatex(annotation.textContent.trim());
-          const isBlock = node.getAttribute('display') === 'block';
-          if (isBlock) {
-            return '\n\n$$\n' + latex + '\n$$\n\n';
+      // Wikipedia 引用
+      service.addRule('wikipediaReference', {
+        filter: function(node) {
+          return node.nodeName === 'SUP' && node.classList && node.classList.contains('reference');
+        },
+        replacement: function(content, node) {
+          const link = node.querySelector('a');
+          if (link) {
+            return '^' + link.textContent.trim() + '^';
           }
-          return '「M」' + latex + '「/M」';
+          return content;
         }
-        return content;
-      }
-    });
+      });
 
-    service.addRule('wikipedia-math', {
-      filter: function(node) {
-        return node.classList && node.classList.contains('mwe-math-element');
-      },
-      replacement: function(content, node) {
-        const annotation = node.querySelector('annotation');
-        if (annotation) {
-          const latex = cleanLatex(annotation.textContent.trim());
-          const isBlock = node.querySelector('.mwe-math-fallback-image-display') !== null;
+      // 移除编辑链接
+      service.addRule('removeEditSection', {
+        filter: function(node) {
+          return node.classList && node.classList.contains('mw-editsection');
+        },
+        replacement: function() { return ''; }
+      });
+    }
+
+    // Codeforces 公式和代码块
+    if (siteInfo.site === 'codeforces') {
+      // MathJax script 标签中的公式
+      service.addRule('codeforcesMathScript', {
+        filter: function(node) {
+          return node.tagName === 'SCRIPT' && node.type && node.type.includes('math/tex');
+        },
+        replacement: function(content, node) {
+          const latex = node.textContent.trim();
+          const isBlock = node.type.includes('mode=display');
           if (isBlock) {
-            return '\n\n$$\n' + latex + '\n$$\n\n';
+            return '\n\n$$\n' + cleanLatexContent(latex) + '\n$$\n\n';
           }
-          return '「M」' + latex + '「/M」';
+          return '「CF」' + cleanLatexContent(latex) + '「/CF」';
         }
-        return content;
-      }
-    });
+      });
 
-    service.addRule('wikipediaFraction', {
-      filter: function(node) {
-        return node.classList && node.classList.contains('sfrac');
-      },
-      replacement: function(content, node) {
-        const num = node.querySelector('.num');
-        const den = node.querySelector('.den');
-        if (num && den) {
-          return '「M」\\frac{' + num.textContent.trim() + '}{' + den.textContent.trim() + '}「/M」';
-        }
-        return content;
-      }
-    });
+      // 移除 MathJax 渲染元素
+      service.addRule('codeforcesMathJax', {
+        filter: function(node) {
+          if (!node.classList) return false;
+          return node.classList.contains('MathJax') || 
+                 node.classList.contains('MathJax_Preview') ||
+                 node.classList.contains('MathJax_Display') ||
+                 node.classList.contains('MathJax_SVG') ||
+                 node.classList.contains('MathJax_SVG_Display');
+        },
+        replacement: function() { return ''; }
+      });
 
-    service.addRule('wikiCiteRef', {
-      filter: function(node) {
-        return node.nodeName === 'SUP' && node.classList && node.classList.contains('reference');
-      },
-      replacement: function(content, node) {
-        const link = node.querySelector('a');
-        if (link) {
-          return '^' + link.textContent.trim() + '^';
+      // 代码块 - 用 innerHTML 处理 <br>
+      service.addRule('codeforcesCodeBlock', {
+        filter: function(node) {
+          if (node.nodeName === 'PRE') return true;
+          return false;
+        },
+        replacement: function(content, node) {
+          // 用 innerHTML 获取并替换 <br>
+          let html = node.innerHTML || '';
+          html = html.replace(/<br\s*\/?>/gi, '\n');
+          
+          // 创建临时元素解析
+          const temp = document.createElement('div');
+          temp.innerHTML = html;
+          let code = temp.textContent || '';
+          
+          // 清理
+          code = code.replace(/^\s*\n/, '').replace(/\n\s*$/, '');
+          
+          return '\n\n```\n' + code + '\n```\n\n';
         }
-        return content;
-      }
-    });
+      });
+    }
 
-    service.addRule('fencedCodeBlock', {
-      filter: function(node) {
-        return node.nodeName === 'PRE' && node.querySelector('code');
-      },
-      replacement: function(content, node) {
-        const code = node.querySelector('code');
-        let language = '';
-        if (code.className) {
-          const match = code.className.match(/(?:language-|lang-)(\w+)/);
-          if (match) language = match[1];
+    // KaTeX 公式（LeetCode, CSDN 等）
+    if (['leetcode', 'csdn', 'katex'].includes(siteInfo.site)) {
+      service.addRule('katexMath', {
+        filter: function(node) {
+          return node.classList && node.classList.contains('katex');
+        },
+        replacement: function(content, node) {
+          const annotation = node.querySelector('.katex-mathml annotation');
+          if (annotation) {
+            const latex = cleanLatexContent(annotation.textContent.trim());
+            const isBlock = node.closest('.katex-display') !== null;
+            if (isBlock) {
+              return '\n\n$$\n' + latex + '\n$$\n\n';
+            }
+            return '$' + latex + '$';
+          }
+          return content;
         }
-        const codeContent = code.textContent.replace(/\n$/, '');
-        return '\n\n```' + language + '\n' + codeContent + '\n```\n\n';
-      }
-    });
+      });
+
+      service.addRule('katexDisplay', {
+        filter: function(node) {
+          return node.classList && node.classList.contains('katex-display');
+        },
+        replacement: function(content, node) {
+          const annotation = node.querySelector('.katex-mathml annotation');
+          if (annotation) {
+            return '\n\n$$\n' + cleanLatexContent(annotation.textContent.trim()) + '\n$$\n\n';
+          }
+          return content;
+        }
+      });
+    }
+
+    // 知乎公式
+    if (siteInfo.site === 'zhihu') {
+      service.addRule('zhihuMath', {
+        filter: function(node) {
+          return node.classList && node.classList.contains('ztext-math');
+        },
+        replacement: function(content, node) {
+          const latex = node.getAttribute('data-tex') || node.textContent.trim();
+          const isBlock = node.getAttribute('data-display') === 'block';
+          if (isBlock) {
+            return '\n\n$$\n' + cleanLatexContent(latex) + '\n$$\n\n';
+          }
+          return '$' + cleanLatexContent(latex) + '$';
+        }
+      });
+    }
+
+    // GitHub 公式
+    if (siteInfo.site === 'github') {
+      service.addRule('githubMath', {
+        filter: 'math',
+        replacement: function(content, node) {
+          const annotation = node.querySelector('annotation[encoding*="tex"]');
+          if (annotation) {
+            const latex = cleanLatexContent(annotation.textContent.trim());
+            const isBlock = node.getAttribute('display') === 'block';
+            if (isBlock) {
+              return '\n\n$$\n' + latex + '\n$$\n\n';
+            }
+            return '$' + latex + '$';
+          }
+          return content;
+        }
+      });
+    }
+
+    // 通用 MathJax 处理
+    if (['mathjax', 'stackoverflow', 'arxiv', 'default'].includes(siteInfo.site)) {
+      service.addRule('mathjaxScript', {
+        filter: function(node) {
+          return node.tagName === 'SCRIPT' && node.type && node.type.includes('math/tex');
+        },
+        replacement: function(content, node) {
+          const latex = node.textContent.trim();
+          const isBlock = node.type.includes('mode=display');
+          if (isBlock) {
+            return '\n\n$$\n' + cleanLatexContent(latex) + '\n$$\n\n';
+          }
+          return '$' + cleanLatexContent(latex) + '$';
+        }
+      });
+
+      service.addRule('mathjaxPreview', {
+        filter: function(node) {
+          return node.classList && (
+            node.classList.contains('MathJax') ||
+            node.classList.contains('MathJax_Preview') ||
+            node.classList.contains('MathJax_Display')
+          );
+        },
+        replacement: function() { return ''; }
+      });
+    }
+
+    // ========== 通用代码块（非 Codeforces）==========
+    if (siteInfo.site !== 'codeforces') {
+      service.addRule('fencedCodeBlock', {
+        filter: function(node) {
+          return node.nodeName === 'PRE' && node.querySelector('code');
+        },
+        replacement: function(content, node) {
+          const code = node.querySelector('code');
+          let language = '';
+          if (code.className) {
+            const match = code.className.match(/(?:language-|lang-)(\w+)/);
+            if (match) language = match[1];
+          }
+          const codeContent = code.textContent.replace(/\n$/, '');
+          return '\n\n```' + language + '\n' + codeContent + '\n```\n\n';
+        }
+      });
+    }
 
     // ========== 表格 ==========
     if (config.preserveTables) {
       service.addRule('table', {
         filter: 'table',
         replacement: function(content, node) {
-          return convertTableToMarkdown(node);
+          return convertTableToMarkdown(node, siteInfo);
         }
       });
     }
 
+    // ========== 图片 ==========
     if (config.preserveImages) {
       service.addRule('image', {
         filter: 'img',
@@ -421,159 +500,298 @@
     return service;
   }
 
-  function cleanLatex(latex) {
-    return latex.trim()
-      .replace(/^\{\\displaystyle\s*/, '')
-      .replace(/\}$/, '')
-      .replace(/^\\\[|\\\]$/g, '')
-      .replace(/^\\\(|\\\)$/g, '')
-      .replace(/^\$\$|\$\$$/g, '')
-      .replace(/^\$|\$$/g, '')
-      .trim();
-  }
+  // ========== 表格转换 ==========
+  function convertTableToMarkdown(table, siteInfo) {
+    const rows = table.querySelectorAll('tr');
+    if (rows.length === 0) return '';
 
-    /**
-   * 后处理 Markdown
-   */
-  function postProcessMarkdown(markdown) {
-    let result = markdown;
-
-    // ========== Step 0: 统一特殊字符（最先执行）==========
-    result = result.replace(/–/g, '-');  // en-dash U+2013
-    result = result.replace(/—/g, '-');  // em-dash U+2014
-    result = result.replace(/−/g, '-');  // minus sign U+2212
-
-    // ========== Step 1: 清理垃圾 ==========
-    result = result.replace(/\.mw-parser-output[\s\S]*?(?=\n\n|\n[A-Z]|$)/g, '');
-    result = result.replace(/⁠/g, '');
+    let markdown = '\n\n';
     
-    // 移除 [编辑] 链接
-    result = result.replace(/\s*\\\[\[编辑\]\([^\)]+\)\\\]\s*/g, '');
-    result = result.replace(/\s*\[编辑\]\([^\)]+\)\s*/g, '');
-    result = result.replace(/\s*\\\[\s*\[编辑\][^\]]*\]\s*/g, '');
-
-    // ========== Step 2: 转换数学标记 ==========
-    result = result.replace(/「M」([^「]+)「\/M」/g, function(match, latex) {
-      return '$' + latex.trim() + '$';
-    });
-
-    // ========== Step 2.5: 清理 LaTeX 公式 ==========
-    result = result.replace(/\$([^$]+)\$/g, function(match, inner) {
-      return '$' + cleanLatexContent(inner) + '$';
-    });
-    
-    result = result.replace(/\$\$\n?([\s\S]+?)\n?\$\$/g, function(match, inner) {
-      return '$$\n' + cleanLatexContent(inner) + '\n$$';
-    });
-
-    // ========== Step 3: 处理斜体变量 ==========
-    result = result.replace(/\*([a-zA-Z])\*/g, function(match, letter) {
-      return '$' + letter + '$';
-    });
-    
-    result = result.replace(/\*([a-zA-Z]{2,3})\*/g, function(match, letters) {
-      const nonMath = ['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'has', 'its', 'two', 'also'];
-      if (nonMath.includes(letters.toLowerCase())) {
-        return '*' + letters + '*';
+    // 处理表格标题
+    const caption = table.querySelector('caption');
+    if (caption) {
+      let captionContent = extractCellContent(caption, siteInfo);
+      captionContent = captionContent.replace(/\s*\[编辑\]\s*/g, '').trim();
+      if (captionContent) {
+        markdown += '**' + captionContent + '**\n\n';
       }
-      return '$' + letters + '$';
-    });
-
-    // ========== Step 4: 处理上标 ==========
-    result = result.replace(/\$([a-zA-Z]+)\$([0-9²³⁴⁵⁶⁷⁸⁹]+)/g, function(match, varName, exp) {
-      return '$' + varName + '^' + convertSuperscript(exp) + '$';
-    });
-
-    result = result.replace(/\b([a-zA-Z])([²³⁴⁵⁶⁷⁸⁹])/g, function(match, letter, exp) {
-      return '$' + letter + '^' + convertSuperscript(exp) + '$';
-    });
-
-    // ========== Step 5: 处理括号+上标 ==========
-    result = result.replace(/\(([^)]+)\)([0-9²³⁴⁵⁶⁷⁸⁹]+)/g, function(match, inner, exp) {
-      const cleanInner = inner.replace(/\$/g, '').trim();
-      return '$(' + cleanInner + ')^' + convertSuperscript(exp) + '$';
-    });
-
-    // ========== Step 6: 数字+变量 ==========
-    result = result.replace(/(\d+)\$([a-zA-Z]+)\$/g, '$$$1$2$$');
-
-    // ========== Step 7: 合并相邻公式 ==========
-    for (let i = 0; i < 5; i++) {
-      result = result.replace(/\$([^$]+)\$\s*\+\s*\$([^$]+)\$/g, '$$$1 + $2$$');
-      result = result.replace(/\$([^$]+)\$\s*-\s*\$([^$]+)\$/g, '$$$1 - $2$$');
-      result = result.replace(/\$([^$]+)\$\s*=\s*\$([^$]+)\$/g, '$$$1 = $2$$');
     }
 
-    // ========== Step 8: 清理多余 $ ==========
-    result = result.replace(/\$\$([^$\n]{1,50})\$(?!\$)/g, '$$$1$$');
-    result = result.replace(/(?<!\$)\$([^$\n]{1,50})\$\$/g, '$$$1$$');
-    result = result.replace(/\${3,}/g, '$$');
+    let headerProcessed = false;
 
-    // ========== Step 9: 已在 Step 0 处理减号 ==========
+    rows.forEach((row, index) => {
+      const cells = row.querySelectorAll('th, td');
+      const cellContents = Array.from(cells).map(cell => extractCellContent(cell, siteInfo));
 
-    // ========== Step 10: 清理引用格式 ==========
-    // ^[注3]^[8]^: 209-213 -> ^[注3][8]:209-213^
-    result = result.replace(/\^\[注(\d+)\]\^\[(\d+)\]\^:\s*(\d+)-(\d+)/g, '^[注$1][$2]:$3-$4^');
-    
-    // ^[注3]^[8]^ -> ^[注3][8]^
-    result = result.replace(/\^\[注(\d+)\]\^\[(\d+)\]\^/g, '^[注$1][$2]^');
-    
-    // ]^[ -> ][
-    result = result.replace(/\]\^\[/g, '][');
-    
-    // ]^: -> ]:
-    result = result.replace(/\]\^:\s*/g, ']:');
-    
-    // 页码末尾加 ^
-    result = result.replace(/:(\d+)-(\d+)([^\^])/g, ':$1-$2^$3');
-    result = result.replace(/:(\d+)-(\d+)$/gm, ':$1-$2^');
-    
-    // 清理 ^^
-    result = result.replace(/\^\^+/g, '^');
+      markdown += '| ' + cellContents.join(' | ') + ' |\n';
 
-    // ========== Step 11: 清理空行 ==========
+      if (!headerProcessed) {
+        const separator = cellContents.map(() => '---').join(' | ');
+        markdown += '| ' + separator + ' |\n';
+        headerProcessed = true;
+      }
+    });
+
+    return markdown + '\n';
+  }
+
+  // ========== 提取单元格内容 ==========
+  function extractCellContent(cell, siteInfo) {
+    // 处理公式
+    const annotations = cell.querySelectorAll('annotation');
+    if (annotations.length > 0) {
+      const formulas = [];
+      annotations.forEach(ann => {
+        let latex = ann.textContent.trim();
+        if (latex) {
+          latex = cleanLatexContent(latex);
+          formulas.push(latex);
+        }
+      });
+      if (formulas.length > 0) {
+        let refText = '';
+        cell.querySelectorAll('sup.reference').forEach(sup => {
+          const link = sup.querySelector('a');
+          if (link) {
+            let refNum = link.textContent.trim().replace(/^\[|\]$/g, '');
+            refText += '^[' + refNum + ']^';
+          }
+        });
+        return '$' + formulas.join(' ') + '$' + refText;
+      }
+    }
+
+    // 处理 mwe-math-element
+    const mathElements = cell.querySelectorAll('.mwe-math-element');
+    if (mathElements.length > 0) {
+      const formulas = [];
+      mathElements.forEach(el => {
+        const ann = el.querySelector('annotation');
+        if (ann) {
+          formulas.push(cleanLatexContent(ann.textContent.trim()));
+        }
+      });
+      if (formulas.length > 0) {
+        return '$' + formulas.join(' ') + '$';
+      }
+    }
+
+    // 处理纯文本和引用
+    const clone = cell.cloneNode(true);
+    
+    clone.querySelectorAll('.mwe-math-element, math').forEach(el => el.remove());
+    
+    // 处理引用
+    let refInfo = null;
+    clone.querySelectorAll('sup.reference').forEach(sup => {
+      const link = sup.querySelector('a');
+      if (link) {
+        let refNum = link.textContent.trim().replace(/^\[|\]$/g, '');
+        refInfo = { num: refNum, element: sup };
+      }
+    });
+    
+    if (refInfo) {
+      let afterText = '';
+      let node = refInfo.element.nextSibling;
+      while (node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          afterText += node.textContent;
+        }
+        node = node.nextSibling;
+      }
+      
+      afterText = afterText.replace(/[–—−]/g, '-');
+      const pageMatch = afterText.match(/^[:\s]*(\d+)\s*-\s*(\d+)/);
+      
+      if (pageMatch) {
+        refInfo.pages = pageMatch[1] + '-' + pageMatch[2];
+        if (refInfo.element.nextSibling) {
+          refInfo.element.nextSibling.textContent = afterText.replace(/^[:\s]*\d+\s*-\s*\d+/, '');
+        }
+      }
+      
+      const refText = refInfo.pages 
+        ? '【REF' + refInfo.num + ':' + refInfo.pages + 'REF】'
+        : '【REF' + refInfo.num + 'REF】';
+      refInfo.element.replaceWith(document.createTextNode(refText));
+    }
+    
+    // 处理普通上标
+    clone.querySelectorAll('sup').forEach(sup => {
+      const content = sup.textContent.trim();
+      if (/^\d+$/.test(content)) {
+        const superscriptMap = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
+        let superText = '';
+        for (const char of content) {
+          superText += superscriptMap[char] || char;
+        }
+        sup.replaceWith(document.createTextNode(superText));
+      }
+    });
+    
+    // 处理下标
+    clone.querySelectorAll('sub').forEach(sub => {
+      const content = sub.textContent.trim();
+      if (/^\d+$/.test(content)) {
+        const subscriptMap = {'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉'};
+        let subText = '';
+        for (const char of content) {
+          subText += subscriptMap[char] || char;
+        }
+        sub.replaceWith(document.createTextNode(subText));
+      }
+    });
+    
+    let text = clone.textContent.trim()
+      .replace(/\|/g, '\\|')
+      .replace(/\s+/g, ' ')
+      .replace(/\n/g, ' ');
+    
+    // 还原引用格式
+    text = text.replace(/【REF(\d+):(\d+-\d+)REF】/g, '^[$1]:$2^');
+    text = text.replace(/【REF(\d+)REF】/g, '^[$1]^');
+
+    return text;
+  }
+
+  // ========== 后处理函数集 ==========
+  const postProcessors = {
+    // 清理编辑链接
+    cleanEditLinks: function(text) {
+      return text
+        .replace(/\s*\\\[\[编辑\]\([^\)]+\)\\\]\s*/g, '')
+        .replace(/\s*\[编辑\]\([^\)]+\)\s*/g, '');
+    },
+
+    // 清理引用格式
+    cleanReferences: function(text) {
+      let result = text;
+      result = result.replace(/\^\[注(\d+)\]\^\[(\d+)\]\^:\s*(\d+)-(\d+)/g, '^[注$1][$2]:$3-$4^');
+      result = result.replace(/\^\[注(\d+)\]\^\[(\d+)\]\^/g, '^[注$1][$2]^');
+      result = result.replace(/\]\^\[/g, '][');
+      result = result.replace(/\]\^:\s*/g, ']:');
+      result = result.replace(/:(\d+)-(\d+)([^\^])/g, ':$1-$2^$3');
+      result = result.replace(/:(\d+)-(\d+)$/gm, ':$1-$2^');
+      result = result.replace(/\^\^+/g, '^');
+      return result;
+    },
+
+    // 清理 LaTeX 空格
+    cleanLatexSpaces: function(text) {
+      return text.replace(/\$([^$]+)\$/g, function(match, inner) {
+        return '$' + cleanLatexContent(inner) + '$';
+      });
+    },
+
+        // 清理 Codeforces 公式重复
+    cleanDoubleMath: function(text) {
+      let result = text;
+      
+      // 转换 Codeforces 标记
+      result = result.replace(/「CF」([^「]+)「\/CF」/g, '$$$1$$');
+      
+      // ===== 修复不完整/损坏的公式 =====
+      // $^{\text{∗$ -> $^*$
+      result = result.replace(/\$\^\{?\\text\{[∗\*][^}]*\$(?!\})/g, '$^*$');
+      result = result.replace(/\$\^\{?\\text\{([^}]*)\$(?!\})/g, '$^{$1}$');
+      
+      // 修复 $...\text{xxx$ 这种未闭合的情况
+      result = result.replace(/\$([^$]*)\\text\{([^}$]*)\$([^$])/g, function(match, before, textContent, after) {
+        return '$' + before + '\\text{' + textContent + '}$' + after;
+      });
+      
+      // ===== 清理公式重复 =====
+      // $n$n -> $n$
+      result = result.replace(/\$([a-zA-Z])\$\1(?![a-zA-Z_\d])/g, '$$$1$$');
+      
+      // $0$0 -> $0$
+      result = result.replace(/\$(\d+)\$\1(?!\d)/g, '$$$1$$');
+      
+      // $x_1$x\_1 -> $x_1$
+      result = result.replace(/\$([a-zA-Z])_(\d+)\$\1[_\\]*\2/g, '$$$1_$2$$');
+      result = result.replace(/\$([a-zA-Z])_\{(\d+)\}\$\1[_\\]*\{?\2\}?/g, '$$$1_{$2}$$');
+      result = result.replace(/\$([a-zA-Z])_([a-zA-Z])\$\1[_\\]*\2/g, '$$$1_$2$$');
+      
+      // $\min$\\min -> $\min$
+      result = result.replace(/\$(\\[a-zA-Z]+)\$\\+[a-zA-Z]+/g, '$$$1$$');
+      result = result.replace(/\$(\\ldots)\$\\+ldots/g, '$$$1$$');
+      
+      // $f(...)$f(...) -> $f(...)$
+      result = result.replace(/\$([a-zA-Z])\(([^)]+)\)\$\1\([^)]+\)/g, '$$$1($2)$$');
+      
+      // 复杂表达式
+      result = result.replace(/\$([^$]+)\$(\d+\s*\\\\[a-zA-Z_\s\\{}^0-9\.\,\(\)\[\]\-\+\=\<\>]+)/g, function(match, latex, escaped) {
+        if (/\\\\[a-zA-Z]/.test(escaped)) {
+          return '$' + latex + '$';
+        }
+        return match;
+      });
+      
+      // 通用清理
+      result = result.replace(/\$([^$]+)\$([a-zA-Z][a-zA-Z0-9_]*(?:\s*\\\\[a-zA-Z_\s\\{}^0-9\.\,]+)*)/g, function(match, latex, text) {
+        const latexSimple = latex.replace(/[\\{}_^\s]/g, '').toLowerCase();
+        const textSimple = text.replace(/[\\{}_^\s]/g, '').toLowerCase();
+        
+        if (latexSimple.length > 0 && textSimple.length > 0) {
+          let matchCount = 0;
+          for (let i = 0; i < Math.min(latexSimple.length, textSimple.length, 5); i++) {
+            if (latexSimple[i] === textSimple[i]) matchCount++;
+          }
+          if (matchCount >= 2 || (latexSimple.length <= 2 && matchCount >= 1)) {
+            return '$' + latex + '$';
+          }
+        }
+        return match;
+      });
+      
+      return result;
+    }
+  };
+
+    // ========== 主后处理函数 ==========
+  function postProcessMarkdown(markdown, siteInfo) {
+    let result = markdown;
+
+    // 统一特殊字符
+    result = result.replace(/[–—−]/g, '-');
+    result = result.replace(/⁠/g, '');
+
+    // 应用网站特定的后处理
+    const processors = siteInfo.config.postProcess || [];
+    for (const procName of processors) {
+      if (postProcessors[procName]) {
+        result = postProcessors[procName](result);
+      }
+    }
+
+    // ===== 最终修复：损坏的公式 =====
+    // Codeforces 脚注 $^{\text{∗$ -> *
+    result = result.split('$^{\\text{∗$').join('*');
+    result = result.split('$^{\\text{*$').join('*');
+    result = result.split('$^\\text{∗$').join('*');
+    result = result.split('$^\\text{*$').join('*');
+    
+    // 正则兜底
+    result = result.replace(/\$\^\{?\\text\{[∗\*]\$?/g, '*');
+
+    // 通用清理
     result = result.replace(/\n{3,}/g, '\n\n');
     result = result.trim();
 
     return result;
   }
 
-    /**
-   * 清理 LaTeX 内容
-   */
-  function cleanLatexContent(latex) {
-    let cleaned = latex
-      .replace(/\\([a-zA-Z]+)\s+\{/g, '\\$1{')
-      .replace(/\}\s+\{/g, '}{')
-      .replace(/\}\s+_/g, '}_')
-      .replace(/\}\s+\^/g, '}^')
-      .replace(/_\s+\{/g, '_{')
-      .replace(/\^\s+\{/g, '^{')
-      .replace(/\s+\}/g, '}')
-      .replace(/\{\s+/g, '{')
-      .replace(/\\[\s]*$/g, '')      // 关键：清理末尾的 \
-      .replace(/\\ $/g, '')          // 关键：清理末尾的 "\ "
-      .replace(/^\s+/, '')
-      .replace(/\s+$/, '')
-      .replace(/[−–]/g, '-');
-    return cleaned;
-  }
-
-
-  function convertSuperscript(str) {
-    return String(str)
-      .replace(/²/g, '2').replace(/³/g, '3').replace(/⁴/g, '4')
-      .replace(/⁵/g, '5').replace(/⁶/g, '6').replace(/⁷/g, '7')
-      .replace(/⁸/g, '8').replace(/⁹/g, '9').replace(/⁰/g, '0');
-  }
-
+  // ========== 主转换函数 ==========
   function convertHtmlToMarkdown(html) {
-    const service = createTurndownService();
+    const siteInfo = getSiteConfig();
+    const service = createTurndownService(siteInfo);
     let markdown = service.turndown(html);
-    markdown = postProcessMarkdown(markdown);
+    markdown = postProcessMarkdown(markdown, siteInfo);
     return markdown;
   }
 
+  // ========== 监听复制事件 ==========
   document.addEventListener('copy', function(e) {
     if (!config.enabled) return;
 
@@ -595,12 +813,14 @@
       e.clipboardData.setData('text/html', html);
       e.preventDefault();
 
-      showNotification('已复制为 Markdown');
+      const siteInfo = getSiteConfig();
+      showNotification('已复制为 Markdown (' + siteInfo.site + ')');
     } catch (error) {
       console.error('Copy as Markdown error:', error);
     }
   });
 
+  // ========== 通知 ==========
   function showNotification(message) {
     const existing = document.querySelector('.copy-md-notification');
     if (existing) existing.remove();
@@ -634,5 +854,7 @@
     }, 2000);
   }
 
-  console.log('Copy as Markdown extension loaded (v10)');
+  // 初始化日志
+  const siteInfo = getSiteConfig();
+  console.log('Copy as Markdown v11 loaded for:', siteInfo.site);
 })();
