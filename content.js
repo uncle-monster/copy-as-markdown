@@ -30,7 +30,7 @@
     });
   }
 
-  // ========== 网���检测 ==========
+  // ========== 网站身份识别 ==========
   function detectSite() {
     const hostname = window.location.hostname.toLowerCase();
     
@@ -191,13 +191,18 @@
   // ========== 清理 LaTeX 内容 ==========
   function cleanLatexContent(latex) {
     if (!latex) return '';
-    // 仅当公式以 {\displaystyle 开头且以 } 结尾时，成对剥离最外层
-    if (latex.startsWith('{\\displaystyle') && latex.endsWith('}')) {
-      latex = latex.substring(15, latex.length - 1);
+    
+    let cleaned = latex.trim();
+
+    // 1. 先剥离 Wikipedia 的外层包装
+    if (cleaned.startsWith('{\\displaystyle') && cleaned.endsWith('}')) {
+      cleaned = cleaned.substring(15, cleaned.length - 1).trim();
     }
-    return latex
-      .replace(/[−–—]/g, '-') // 统一减号字符
-      .replace(/\\([a-zA-Z]+)\s+\{/g, '\\$1{') // 修复 LaTeX 里的多余空格
+
+    // 2. 统一清理末尾可能存在的所有转义空格、多余斜杠或空白
+    return cleaned
+      .replace(/[\\ ]+$/, '') // 这里的正则更激进，会清理掉末尾所有的 \ 和空格
+      .replace(/[−–—]/g, '-') 
       .trim();
   }
 
@@ -795,6 +800,8 @@
     // 通用清理
     result = result.replace(/\n{3,}/g, '\n\n');
     result = result.trim();
+
+    
 
     return result;
   }
