@@ -333,25 +333,39 @@
       });
 
       // 代码块 - 用 innerHTML 处理 <br>
-      service.addRule('codeforcesCodeBlock', {
+      // 优化后的代码块处理逻辑
+      service.addRule('universalCodeBlock', {
         filter: function(node) {
-          if (node.nodeName === 'PRE') return true;
-          return false;
+          // 匹配 pre 标签，或者 codeforces 特有的 input/output 类
+          return node.nodeName === 'PRE' || node.classList.contains('input') || node.classList.contains('output');
         },
         replacement: function(content, node) {
-          // 用 innerHTML 获取并替换 <br>
-          let html = node.innerHTML || '';
-          html = html.replace(/<br\s*\/?>/gi, '\n');
-          
-          // 创建临时元素解析
-          const temp = document.createElement('div');
-          temp.innerHTML = html;
-          let code = temp.textContent || '';
-          
-          // 清理
-          code = code.replace(/^\s*\n/, '').replace(/\n\s*$/, '');
-          
-          return '\n\n```\n' + code + '\n```\n\n';
+          // 1. 克隆节点以免影响页面显示
+          let clone = node.cloneNode(true);
+
+          // 2. 处理特殊的换行标签：将 <br>, <p>, <div> 替换为换行占位符
+          // 许多 OJ 网站（如 Codeforces）的代码块换行是靠这些标签实现的
+          clone.querySelectorAll('br').forEach(br => br.replaceWith('\n'));
+          clone.querySelectorAll('p, div').forEach(block => {
+            block.prepend('\n');
+            block.append('\n');
+          });
+
+          // 3. 获取处理后的文本
+          let code = clone.innerText || clone.textContent || '';
+
+          // 4. 清理多余的空行和首尾空格
+          code = code.replace(/\n{3,}/g, '\n\n').trim();
+
+          // 5. 根据父容器判断语言（可选）
+          let language = '';
+          const codeTag = node.querySelector('code');
+          if (codeTag && codeTag.className) {
+            const match = codeTag.className.match(/(?:language-|lang-)(\w+)/);
+            if (match) language = match[1];
+          }
+
+          return '\n\n```' + language + '\n' + code + '\n```\n\n';
         }
       });
     }
