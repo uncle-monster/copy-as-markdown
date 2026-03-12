@@ -27,7 +27,23 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["lib/turndown.js", "content.js"],
+      "js": [
+        "lib/turndown.js",
+        "content/core/namespace.js",
+        "content/core/config.js",
+        "content/core/latex.js",
+        "content/core/table.js",
+        "content/core/postprocess.js",
+        "content/core/turndownFactory.js",
+        "content/sites/default.js",
+        "content/sites/wikipedia.js",
+        "content/sites/codeforces.js",
+        "content/sites/katex.js",
+        "content/sites/zhihu.js",
+        "content/sites/github.js",
+        "content/sites/mathjax.js",
+        "content/main.js"
+      ],
       "run_at": "document_end"
     }
   ],
